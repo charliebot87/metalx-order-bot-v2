@@ -1,5 +1,5 @@
 import { Pool, PoolClient } from 'pg';
-import type { IDatabase, UserRow, OrderInfo } from '../types.js';
+import type { IDatabase, UserRow } from '../types.js';
 
 const SCHEMA = `
 CREATE TABLE IF NOT EXISTS users (
@@ -191,70 +191,6 @@ export class PostgresDatabase implements IDatabase {
        ON CONFLICT (key) DO UPDATE SET value = EXCLUDED.value`,
       [key, value]
     );
-  }
-
-  // ─── Order fill tracking ─────────────────────────────────────────────────────
-
-  async upsertOrder(order: {
-    telegram_chat_id: string;
-    xpr_account: string;
-    deposit_trx_id: string;
-    deposit_quantity: string;
-    deposit_symbol: string;
-    deposit_amount: number;
-    received_symbol: string;
-  }): Promise<boolean> {
-    const { rows } = await this.pool.query(
-      `INSERT INTO dex_orders
-         (telegram_chat_id, xpr_account, deposit_trx_id, deposit_quantity, deposit_symbol, deposit_amount, received_symbol)
-       VALUES ($1, $2, $3, $4, $5, $6, $7)
-       ON CONFLICT (deposit_trx_id) DO NOTHING
-       RETURNING id`,
-      [
-        order.telegram_chat_id,
-        order.xpr_account,
-        order.deposit_trx_id,
-        order.deposit_quantity,
-        order.deposit_symbol,
-        order.deposit_amount,
-        order.received_symbol,
-      ],
-    );
-    return rows.length > 0;
-  }
-
-  async addFill(xpr_account: string, received_symbol: string, received_amount: number): Promise<OrderInfo | null> {
-    const { rows: found } = await this.pool.query(
-      `SELECT id, deposit_quantity, deposit_symbol, deposit_amount
-       FROM dex_orders
-       WHERE xpr_account = $1 AND deposit_symbol != $2
-       ORDER BY created_at DESC
-       LIMIT 1`,
-      [xpr_account, received_symbol],
-    );
-
-    if (!found[0]) return null;
-    const id = found[0].id;
-
-    const { rows: updated } = await this.pool.query(
-      `UPDATE dex_orders
-       SET total_received = total_received + $1,
-           fill_count     = fill_count + 1,
-           updated_at     = NOW()
-       WHERE id = $2
-       RETURNING deposit_quantity, deposit_symbol, deposit_amount, total_received, fill_count`,
-      [received_amount, id],
-    );
-
-    if (!updated[0]) return null;
-    const r = updated[0];
-    return {
-      deposit_quantity: r.deposit_quantity,
-      deposit_symbol:   r.deposit_symbol,
-      deposit_amount:   parseFloat(r.deposit_amount),
-      total_received:   parseFloat(r.total_received),
-      fill_count:       r.fill_count,
-    };
   }
 
   // ─── Helpers ─────────────────────────────────────────────────────────────────

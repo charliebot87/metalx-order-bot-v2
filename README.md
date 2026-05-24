@@ -14,36 +14,14 @@ A self-hosted Telegram bot that sends you real-time notifications when your orde
 
 ## What It Looks Like
 
-**Single fill:**
+**Trade fill:**
 ```
-💰 Order Fill
+💰 Metal X Trade
 
-Sold: 854.0000 XPR
-Fill received: 1.992400 XMD
-Account: charliebot
-
-📊 View on Metal X
-🔍 View Transaction
-```
-
-**Partial fill (same order filling in multiple chunks):**
-```
-💰 Order Fill (partial)
-
-Sold: 854.0000 XPR
-Fill received: 0.583363 XMD
-Total received: 4.162400 XMD (fill 3)
-Account: charliebot
-
-📊 View on Metal X
-🔍 View Transaction
-```
-
-**Fallback (no order context found):**
-```
-💰 Order Fill
-
-Received: 1.992400 XMD
+Market: XPR/XMD
+Received: 1.9924 XMD
+Counter amount: 854 XPR
+Price: 0.002333 XMD/XPR
 Account: charliebot
 
 📊 View on Metal X
@@ -236,15 +214,15 @@ Only XMD pairs are monitored. Markets are loaded from the on-chain `dex` contrac
 
 ### How It Works
 
-The bot monitors **withdrawals from the DEX contract** — when an order fills, the DEX sends your tokens back to your account. The bot detects these transfers and sends you a notification showing what you sold and what you received.
+The bot monitors **authoritative Metal X trade records** from the Metal X trades API. It does not infer fills from `dex → account` transfers, because those transfers can be referral-cut withdrawals or balance sweeps unrelated to a user's active order.
 
 ### Polling Loop
 
 Every 3 seconds (configurable), for each verified user:
-1. Queries Hyperion for new transfer actions where `from=dex` and `to=user`
-2. Correlates with the most recent deposit to show "Sold X → Received Y"
+1. Queries the Metal X trades API for new executed trades across XMD markets
+2. Formats the actual trade row into a notification
 3. Sends Telegram notification (with dedup and rate limiting)
-4. Advances the per-user checkpoint timestamp
+4. Advances the per-user trade checkpoint timestamp
 
 ### Daily Summary
 
@@ -256,7 +234,8 @@ This is a read-only notification bot:
 
 - It never asks for private keys.
 - It has no signing dependency and does not construct transactions.
-- It only reads Hyperion/RPC data and sends Telegram notifications.
+- It only reads Metal X trade data, Hyperion/RPC verification data, and sends Telegram notifications.
+- It explicitly ignores `dex → account` transfers for fills because those can be referral cuts.
 - Startup refuses private-key-shaped environment variables or common signing key names.
 - `npm test` runs a source guard that blocks private-key/signing patterns in tracked files.
 - Any live-chain testing that needs a transaction must happen outside the bot with the Proton CLI keychain, never with a key pasted into code or `.env`.

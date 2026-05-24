@@ -1,6 +1,5 @@
 import type { Bot } from 'grammy';
-import type { IDatabase, OrderInfo } from './types.js';
-import type { DexWithdrawal, DexDeposit } from './hyperion.js';
+import type { IDatabase } from './types.js';
 import type { TradeRecord } from './trades.js';
 
 // ─── Rate limiter ──────────────────────────────────────────────────────────────
@@ -40,61 +39,6 @@ function formatNumber(value: number, decimals = 6): string {
   });
 }
 
-/**
- * Build the Telegram HTML message for a DEX withdrawal notification.
- * Uses orderInfo to show cumulative fill progress when available.
- */
-export function buildWithdrawalMessage(
-  w: DexWithdrawal,
-  account: string,
-  orderInfo: OrderInfo | null,
-): string {
-  const lines: string[] = [];
-
-  if (orderInfo) {
-    const { deposit_quantity, deposit_symbol, deposit_amount, total_received, fill_count } = orderInfo;
-    const title = fill_count > 1 ? '💰 <b>Order Fill (partial)</b>' : '💰 <b>Order Fill</b>';
-    lines.push(title, '');
-    lines.push(`Sold: <b>${deposit_quantity}</b>`);
-    lines.push(`Fill received: <b>${w.quantity}</b>`);
-    if (fill_count > 1) {
-      lines.push(`Total received: <b>${total_received.toFixed(6)} ${w.symbol} (fill ${fill_count})</b>`);
-    }
-    if (deposit_amount > 0) {
-      const isBuy = deposit_symbol === 'XMD';
-      const xmdAmount = isBuy ? deposit_amount : w.amount;
-      const baseAmount = isBuy ? w.amount : deposit_amount;
-      const baseSymbol = isBuy ? w.symbol : deposit_symbol;
-      const price = xmdAmount / baseAmount;
-      lines.push(`Price: <b>${price.toFixed(6)} XMD/${baseSymbol}</b>`);
-    }
-  } else {
-    lines.push('💰 <b>Order Fill</b>', '');
-    lines.push(`Received: <b>${w.quantity}</b>`);
-  }
-
-  lines.push(`Account: <code>${account}</code>`);
-  lines.push('');
-  lines.push(`<a href="${METALX_URL}/dex">📊 View on Metal X</a>`);
-  lines.push(`<a href="${explorerLink(w.trxId)}">🔍 View Transaction</a>`);
-
-  return lines.join('\n');
-}
-
-/**
- * Build the Telegram HTML message for an "Order Placed" notification.
- */
-export function buildOrderPlacedMessage(deposit: DexDeposit, account: string): string {
-  const lines: string[] = [];
-  const isBuy = deposit.symbol === 'XMD';
-  lines.push('📋 <b>Order Placed</b>', '');
-  lines.push(`${isBuy ? 'Buying with' : 'Selling'}: <b>${deposit.quantity}</b>`);
-  lines.push(`Account: <code>${account}</code>`);
-  lines.push('');
-  lines.push(`<a href="${EXPLORER_URL}/${deposit.trxId}">🔍 View Transaction</a>`);
-  return lines.join('\n');
-}
-
 export function buildTradeMessage(
   trade: TradeRecord,
   account: string,
@@ -103,8 +47,9 @@ export function buildTradeMessage(
   const [bidSymbol = 'BID', askSymbol = 'ASK'] = marketName.split('/');
   const isBidUser = trade.bid_user === account;
 
-  // Metal X trade rows are authoritative executions. Avoid inferring from later
-  // dex withdrawall transfers, which can sweep unrelated balances from old orders.
+  // Metal X trade rows are authoritative executions. Do not infer fills from
+  // dex -> account transfers; those can be referral-cut withdrawals or balance
+  // sweeps unrelated to the user's active order.
   const received = isBidUser
     ? `${formatNumber(trade.bid_amount)} ${bidSymbol}`
     : `${formatNumber(trade.ask_amount)} ${askSymbol}`;
@@ -176,60 +121,6 @@ export class NotificationService {
         console.error(`[notifications] Failed to send to ${chatId}:`, errMsg);
       }
       return false;
-    }
-  }
-
-  async sendWithdrawal(chatId: string, w: DexWithdrawal, account: string, orderInfo: OrderInfo | null): Promise<boolean> {
-    // Dedup by global_seq (unique per action)
-    const already = await this.db.hasNotified(chatId, w.globalSeq, 0);
-    if (already) return false;
-
-    if (!this.rateLimiter.allow(chatId)) {
-      console.warn(`[notifications] Rate limit hit for chat ${chatId}`);
-      return false;
-    }
-
-    const message = buildWithdrawalMessage(w, account, orderInfo);
-
-    try {
-      console.log(`[notifications] Sending withdrawal: ${w.quantity} to ${account} (chat ${chatId})`);
-      await this.bot.api.sendMessage(chatId, message, {
-        parse_mode: 'HTML',
-        link_preview_options: { is_disabled: true },
-      });
-      await this.db.recordNotification(chatId, w.globalSeq, 0, 0);
-      console.log(`[notifications] Sent successfully`);
-      return true;
-    } catch (err) {
-      const errMsg = (err as Error).message ?? '';
-      if (errMsg.includes('403') || errMsg.includes('blocked')) {
-        console.warn(`[notifications] User ${chatId} blocked bot`);
-      } else {
-        console.error(`[notifications] Failed to send to ${chatId}:`, errMsg);
-      }
-      return false;
-    }
-  }
-
-  async sendOrderPlaced(chatId: string, deposit: DexDeposit, account: string): Promise<void> {
-    if (!this.rateLimiter.allow(chatId)) {
-      console.warn(`[notifications] Rate limit hit for chat ${chatId}`);
-      return;
-    }
-    const message = buildOrderPlacedMessage(deposit, account);
-    try {
-      console.log(`[notifications] Sending order placed: ${deposit.quantity} from ${account} (chat ${chatId})`);
-      await this.bot.api.sendMessage(chatId, message, {
-        parse_mode: 'HTML',
-        link_preview_options: { is_disabled: true },
-      });
-    } catch (err) {
-      const errMsg = (err as Error).message ?? '';
-      if (errMsg.includes('403') || errMsg.includes('blocked')) {
-        console.warn(`[notifications] User ${chatId} blocked bot`);
-      } else {
-        console.error(`[notifications] Failed to send to ${chatId}:`, errMsg);
-      }
     }
   }
 

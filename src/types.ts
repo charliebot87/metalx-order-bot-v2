@@ -46,16 +46,6 @@ export interface TableRowsResponse<T> {
   next_key: string;
 }
 
-// ─── Order tracking ───────────────────────────────────────────────────────────
-
-export interface OrderInfo {
-  deposit_quantity: string;
-  deposit_symbol: string;
-  deposit_amount: number;
-  total_received: number;
-  fill_count: number;
-}
-
 // ─── Database row types ───────────────────────────────────────────────────────
 
 export interface UserRow {
@@ -102,18 +92,6 @@ export interface IDatabase {
   getState(key: string): Promise<string | undefined>;
   setState(key: string, value: string): Promise<void>;
 
-  // Order fill tracking
-  upsertOrder(order: {
-    telegram_chat_id: string;
-    xpr_account: string;
-    deposit_trx_id: string;
-    deposit_quantity: string;
-    deposit_symbol: string;
-    deposit_amount: number;
-    received_symbol: string;
-  }): Promise<boolean>;
-
-  addFill(xpr_account: string, received_symbol: string, received_amount: number): Promise<OrderInfo | null>;
 }
 
 // ─── Endpoint health tracking ─────────────────────────────────────────────────

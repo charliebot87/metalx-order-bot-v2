@@ -1,7 +1,7 @@
 import BetterSqlite3 from "better-sqlite3";
 import path from "path";
 import fs from "fs";
-import type { IDatabase, UserRow, OrderInfo } from "../types.js";
+import type { IDatabase, UserRow } from "../types.js";
 
 const SCHEMA_STATEMENTS = [
   `CREATE TABLE IF NOT EXISTS users (
@@ -178,76 +178,6 @@ export class SqliteDatabase implements IDatabase {
          ON CONFLICT(key) DO UPDATE SET value = excluded.value`
       )
       .run(key, value);
-  }
-
-  // Order fill tracking
-
-  async upsertOrder(order: {
-    telegram_chat_id: string;
-    xpr_account: string;
-    deposit_trx_id: string;
-    deposit_quantity: string;
-    deposit_symbol: string;
-    deposit_amount: number;
-    received_symbol: string;
-  }): Promise<boolean> {
-    const result = this.db
-      .prepare(
-        `INSERT INTO dex_orders
-           (telegram_chat_id, xpr_account, deposit_trx_id, deposit_quantity, deposit_symbol, deposit_amount, received_symbol)
-         VALUES (?, ?, ?, ?, ?, ?, ?)
-         ON CONFLICT(deposit_trx_id) DO NOTHING`
-      )
-      .run(
-        order.telegram_chat_id,
-        order.xpr_account,
-        order.deposit_trx_id,
-        order.deposit_quantity,
-        order.deposit_symbol,
-        order.deposit_amount,
-        order.received_symbol,
-      );
-    return result.changes > 0;
-  }
-
-  async addFill(xpr_account: string, received_symbol: string, received_amount: number): Promise<OrderInfo | null> {
-    const row = this.db
-      .prepare(
-        `SELECT id, deposit_quantity, deposit_symbol, deposit_amount
-         FROM dex_orders
-         WHERE xpr_account = ? AND deposit_symbol != ?
-         ORDER BY created_at DESC
-         LIMIT 1`
-      )
-      .get(xpr_account, received_symbol) as { id: number; deposit_quantity: string; deposit_symbol: string; deposit_amount: number } | undefined;
-
-    if (!row) return null;
-
-    this.db
-      .prepare(
-        `UPDATE dex_orders
-         SET total_received = total_received + ?,
-             fill_count     = fill_count + 1,
-             updated_at     = CURRENT_TIMESTAMP
-         WHERE id = ?`
-      )
-      .run(received_amount, row.id);
-
-    const updated = this.db
-      .prepare(
-        `SELECT deposit_quantity, deposit_symbol, deposit_amount, total_received, fill_count
-         FROM dex_orders WHERE id = ?`
-      )
-      .get(row.id) as any | undefined;
-
-    if (!updated) return null;
-    return {
-      deposit_quantity: updated.deposit_quantity,
-      deposit_symbol:   updated.deposit_symbol,
-      deposit_amount:   updated.deposit_amount,
-      total_received:   updated.total_received,
-      fill_count:       updated.fill_count,
-    };
   }
 
   // Helpers
