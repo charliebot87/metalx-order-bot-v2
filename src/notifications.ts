@@ -50,11 +50,15 @@ export function buildTradeMessage(
   // Metal X trade rows are authoritative executions. Do not infer fills from
   // dex -> account transfers; those can be referral-cut withdrawals or balance
   // sweeps unrelated to the user's active order.
+  // In Metal X trade rows, bid_user provided/sold the bid token and
+  // receives the ask token. ask_user provided/sold the ask token and receives
+  // the bid token. Totals include the side's fee when present.
+  const sold = isBidUser
+    ? `${formatNumber(trade.bid_total)} ${bidSymbol}`
+    : `${formatNumber(trade.ask_total)} ${askSymbol}`;
   const received = isBidUser
-    ? `${formatNumber(trade.bid_amount)} ${bidSymbol}`
-    : `${formatNumber(trade.ask_amount)} ${askSymbol}`;
-  const counterAmount = isBidUser ? trade.ask_amount : trade.bid_amount;
-  const counterSymbol = isBidUser ? askSymbol : bidSymbol;
+    ? `${formatNumber(trade.ask_amount)} ${askSymbol}`
+    : `${formatNumber(trade.bid_amount)} ${bidSymbol}`;
   const fee = isBidUser ? trade.bid_fee : trade.ask_fee;
   const feeSymbol = isBidUser ? bidSymbol : askSymbol;
 
@@ -62,9 +66,9 @@ export function buildTradeMessage(
     '💰 <b>Metal X Trade</b>',
     '',
     `Market: <b>${marketName}</b>`,
+    `Sold: <b>${sold}</b>`,
     `Received: <b>${received}</b>`,
-    `Counter amount: <b>${formatNumber(counterAmount)} ${counterSymbol}</b>`,
-    `Price: <b>${formatNumber(trade.price, 8)} XMD/${bidSymbol}</b>`,
+    `Price: <b>${formatNumber(trade.price, 8)} ${askSymbol}/${bidSymbol}</b>`,
   ];
 
   if (fee > 0) {
