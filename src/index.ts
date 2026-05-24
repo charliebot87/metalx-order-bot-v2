@@ -2,12 +2,12 @@ import 'dotenv/config';
 import { Bot } from 'grammy';
 import { createDatabase } from './db/index.js';
 import { MarketRegistry } from './markets.js';
-import { HyperionClient, parseWithdrawal, parseDeposit, advanceTimestamp, latestTimestamp } from './hyperion.js';
+import { HyperionClient } from './hyperion.js';
 import { NotificationService } from './notifications.js';
 import { setupBot } from './bot.js';
-import type { HyperionAction } from './types.js';
 import { runDailySummary } from './daily-summary.js';
 import { assertNoPrivateKeyConfiguration } from './security.js';
+import { fetchRecentTrades } from './trades.js';
 
 // ─── Config ───────────────────────────────────────────────────────────────────
 
@@ -89,23 +89,27 @@ async function pollVerification(
   }
 }
 
-// ─── Main polling loop — per-user withdrawal monitoring ─────────────────────────
+// ─── Main polling loop — per-user Metal X trade monitoring ─────────────────────
 
-async function pollWithdrawals(
-  hyperion: HyperionClient,
+async function pollTrades(
   db: Awaited<ReturnType<typeof createDatabase>>,
   notifications: NotificationService,
+  markets: MarketRegistry,
 ): Promise<void> {
   const users = await db.getVerifiedUsers();
   if (users.length === 0) return;
+
+  const marketNames = new Map<number, string>();
+  for (const m of await markets.getAll()) {
+    marketNames.set(m.market_id, `${m.bidSymbol}/${m.askSymbol}`);
+  }
 
   for (let i = 0; i < users.length; i++) {
     const user = users[i];
     const account = user.xpr_account;
     const chatId = user.telegram_chat_id;
 
-    // Per-user checkpoint
-    const stateKey = `checkpoint:${account}`;
+    const stateKey = `trade-checkpoint:${account}`;
     let checkpoint = await db.getState(stateKey);
 
     if (!checkpoint) {
@@ -114,60 +118,29 @@ async function pollWithdrawals(
       continue;
     }
 
-    // Stale protection
     const age = (Date.now() - new Date(checkpoint).getTime()) / 1000;
     if (age > MAX_STALE_SECONDS) {
       const resetTo = new Date().toISOString();
-      console.warn(`[poll] Checkpoint for ${account} is ${Math.round(age)}s old, resetting`);
+      console.warn(`[poll] Trade checkpoint for ${account} is ${Math.round(age)}s old, resetting`);
       await db.setState(stateKey, resetTo);
       continue;
     }
 
     try {
-      const [withdrawals, deposits] = await Promise.all([
-        hyperion.getDexWithdrawals(account, checkpoint),
-        hyperion.getDexDeposits(account, checkpoint),
-      ]);
-
-      // Record each deposit as an order so we can track fills
-      for (const action of deposits) {
-        const d = parseDeposit(action);
-        if (!d) continue;
-        const isNew = await db.upsertOrder({
-          telegram_chat_id: chatId,
-          xpr_account:      account,
-          deposit_trx_id:   d.trxId,
-          deposit_quantity: d.quantity,
-          deposit_symbol:   d.symbol,
-          deposit_amount:   d.amount,
-          received_symbol:  '',
-        });
-        if (isNew) {
-          await notifications.sendOrderPlaced(chatId, d, account);
-        }
+      const trades = await fetchRecentTrades(account, checkpoint);
+      for (const trade of trades) {
+        const marketName = marketNames.get(trade.market_id) ?? `market ${trade.market_id}`;
+        await notifications.sendTrade(chatId, trade, account, marketName);
       }
 
-      for (const action of withdrawals) {
-        const w = parseWithdrawal(action);
-        if (!w) continue;
-
-        const orderInfo = await db.addFill(account, w.symbol, w.amount);
-        await notifications.sendWithdrawal(chatId, w, account, orderInfo);
-      }
-
-      // Advance checkpoint past the latest seen action
-      const allActions = [...withdrawals, ...deposits];
-      if (allActions.length > 0) {
-        const latest = latestTimestamp(allActions);
-        if (latest) {
-          await db.setState(stateKey, advanceTimestamp(latest));
-        }
+      if (trades.length > 0) {
+        const latest = trades[trades.length - 1].block_time;
+        await db.setState(stateKey, new Date(new Date(latest).getTime() + 1).toISOString());
       }
     } catch (err) {
-      console.error(`[poll] Error checking ${account}:`, (err as Error).message);
+      console.error(`[poll] Error checking trades for ${account}:`, (err as Error).message);
     }
 
-    // Delay between accounts to avoid Hyperion rate limits
     if (i < users.length - 1) {
       await new Promise(r => setTimeout(r, PER_ACCOUNT_DELAY_MS));
     }
@@ -216,7 +189,7 @@ async function main(): Promise<void> {
 
   const poll = async () => {
     try {
-      await pollWithdrawals(hyperion, db, notificationService);
+      await pollTrades(db, notificationService, markets);
     } catch (err) {
       console.error('[poll] Unhandled error:', err);
     }

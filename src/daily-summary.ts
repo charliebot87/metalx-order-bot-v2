@@ -1,32 +1,6 @@
 import type { IDatabase } from './types.js';
 import type { NotificationService } from './notifications.js';
-
-const DEX_API = 'https://dex.api.mainnet.metalx.com';
-
-// All XMD market symbols
-const XMD_MARKETS = [
-  'XPR_XMD', 'XBTC_XMD', 'XETH_XMD',
-  'XMT_XMD', 'LOAN_XMD', 'METAL_XMD', 'XDC_XMD',
-  'XDOGE_XMD', 'XHBAR_XMD', 'XLTC_XMD', 'XXRP_XMD',
-  'XSOL_XMD', 'XXLM_XMD', 'XADA_XMD',
-];
-
-interface TradeRecord {
-  trade_id: string;
-  market_id: number;
-  price: number;
-  bid_user: string;
-  ask_user: string;
-  bid_total: number;
-  bid_amount: number;
-  bid_fee: number;
-  ask_total: number;
-  ask_amount: number;
-  ask_fee: number;
-  order_side: number;
-  block_time: string;
-  trx_id: string;
-}
+import { XMD_MARKETS, fetchTradesForMarket, type TradeRecord } from './trades.js';
 
 interface MarketApiData {
   market_id: number;
@@ -51,17 +25,9 @@ async function fetchDailyTrades(account: string): Promise<TradeRecord[]> {
 
   for (const market of XMD_MARKETS) {
     try {
-      const url = `${DEX_API}/dex/v1/trades/history?account=${account}&symbol=${market}&offset=0&limit=100`;
-      const res = await fetch(url, {
-        headers: { 'Accept': 'application/json' },
-        signal: AbortSignal.timeout(10_000),
-      });
-
-      if (!res.ok) continue;
-      const data = await res.json() as { data: TradeRecord[] };
-
+      const data = await fetchTradesForMarket(account, market, 100);
       const cutoff = new Date(Date.now() - 24 * 60 * 60 * 1000).toISOString();
-      const recentTrades = (data.data ?? []).filter(t => t.block_time >= cutoff);
+      const recentTrades = data.filter(t => t.block_time >= cutoff);
       allTrades.push(...recentTrades);
     } catch {
       // Skip failed markets silently
