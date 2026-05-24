@@ -1,0 +1,43 @@
+{
+  "name": "metalx-order-bot",
+  "version": "1.0.0",
+  "description": "Telegram notification bot for Metal X DEX order fills on XPR Network",
+  "main": "dist/index.js",
+  "scripts": {
+    "dev": "tsx watch src/index.ts",
+    "build": "tsc",
+    "start": "node dist/index.js",
+    "clean": "rm -rf dist",
+    "guard:secrets": "node scripts/guard-no-private-keys.mjs",
+    "smoke:proton": "bash scripts/proton-cli-smoke-test.sh",
+    "test": "npm run guard:secrets && npm run build"
+  },
+  "keywords": [
+    "telegram",
+    "bot",
+    "xpr",
+    "proton",
+    "metalx",
+    "dex",
+    "notifications",
+    "xprnetwork"
+  ],
+  "type": "module",
+  "license": "MIT",
+  "dependencies": {
+    "better-sqlite3": "^11.9.1",
+    "dotenv": "^16.4.5",
+    "grammy": "^1.31.0",
+    "pg": "^8.12.0"
+  },
+  "devDependencies": {
+    "@types/better-sqlite3": "^7.6.0",
+    "@types/node": "^20.14.0",
+    "@types/pg": "^8.11.6",
+    "tsx": "^4.16.0",
+    "typescript": "^5.4.5"
+  },
+  "engines": {
+    "node": ">=20.0.0"
+  }
+}
